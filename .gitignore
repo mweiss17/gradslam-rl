@@ -1,2 +1,6 @@
+tonic/tonic_data/
+quadruped*
+gym/
+.ipynb_checkpoints/
 results/*
 .idea/*

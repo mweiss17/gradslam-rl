@@ -19,14 +19,13 @@
     <geom solimp=".9 .99 .003" solref=".01 1"/>
     <default class="body">
       <geom  type="capsule" size=".08" condim="1" material="self" density="500"/>
-      <joint type="hinge" damping="30" armature=".01"
-             limited="true" solimplimit="0 .99 .01"/>
+      <joint type="hinge" damping="30" armature=".01" limited="true" solimplimit="0 .99 .01"/><!-- damping was 30-->
       <default class="hip">
         <default class="yaw">
           <joint axis="0 0 1" range="-50 50"/>
         </default>
         <default class="pitch">
-          <joint axis="0 1 0" range="-20 60"/>
+          <joint axis="0 1 0" range="-60 60"/><!-- -60 was -20, want to JUMP -->
         </default>
         <geom fromto="0 0 0 .3 0 .11"/>
       </default>
@@ -59,10 +58,10 @@
       <general ctrlrange="-1 1"/>
     </default>
     <default class="lift_act">
-      <general ctrlrange="-1 1.1"/>
+      <general ctrlrange="-1.5 1.5"/><!-- Increased from -1 to 1.1-->
     </default>
     <default class="extend_act">
-      <general ctrlrange="-.8 .8"/>
+      <general ctrlrange="-1.5 1.5"/> <!-- Increased from -.8 to .8-->
     </default>
   </default>
 

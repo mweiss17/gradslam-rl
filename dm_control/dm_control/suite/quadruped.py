@@ -39,6 +39,7 @@ _CONTROL_TIMESTEP = .02
 # Horizontal speeds above which the move reward is 1.
 _RUN_SPEED = 5
 _WALK_SPEED = 0.5
+_JUMP_HEIGHT = 1.25
 
 # Constants related to terrain generation.
 _HEIGHTFIELD_ID = 0
@@ -104,6 +105,40 @@ def walk(time_limit=_DEFAULT_TIME_LIMIT, random=None, environment_kwargs=None):
                              control_timestep=_CONTROL_TIMESTEP,
                              **environment_kwargs)
 
+@SUITE.add()
+def jump(time_limit=_DEFAULT_TIME_LIMIT, random=None, environment_kwargs=None):
+  """Returns the Jump task."""
+  xml_string = make_model(floor_size=_DEFAULT_TIME_LIMIT * _WALK_SPEED)
+  physics = Physics.from_xml_string(xml_string, common.ASSETS)
+  task = Jump(desired_height=_JUMP_HEIGHT, random=random)
+  environment_kwargs = environment_kwargs or {}
+  return control.Environment(physics, task, time_limit=time_limit,
+                             control_timestep=_CONTROL_TIMESTEP,
+                             **environment_kwargs)
+
+@SUITE.add()
+def climb(time_limit=_DEFAULT_TIME_LIMIT, random=None, environment_kwargs=None):
+  """Returns the Climb task."""
+  xml_string = make_model(floor_size=40, terrain=True, rangefinders=True)
+  physics = Physics.from_xml_string(xml_string, common.ASSETS)
+  task = Climb(random=random)
+  environment_kwargs = environment_kwargs or {}
+  return control.Environment(physics, task, time_limit=time_limit,
+                             control_timestep=_CONTROL_TIMESTEP,
+                             **environment_kwargs)
+
+@SUITE.add()
+def hurdles(time_limit=_DEFAULT_TIME_LIMIT, random=None, environment_kwargs=None):
+  """Returns the Hurdles task."""
+  xml_string = make_model(floor_size=40, terrain=True, rangefinders=True)
+  physics = Physics.from_xml_string(xml_string, common.ASSETS)
+  task = Hurdles(random=random)
+  environment_kwargs = environment_kwargs or {}
+  return control.Environment(physics, task, time_limit=time_limit,
+                             control_timestep=_CONTROL_TIMESTEP,
+                             **environment_kwargs)
+
+
 
 @SUITE.add()
 def run(time_limit=_DEFAULT_TIME_LIMIT, random=None, environment_kwargs=None):
@@ -167,6 +202,9 @@ class Physics(mujoco.Physics):
   def torso_velocity(self):
     """Returns the velocity of the torso, in the local frame."""
     return self.named.data.sensordata['velocimeter'].copy()
+
+  def torso_height(self):
+    return self.named.data.sensordata['center_of_mass'].copy()
 
   def egocentric_state(self):
     """Returns the state without global orientation or position."""
@@ -352,6 +390,207 @@ class Move(base.Task):
         sigmoid='linear')
 
     return _upright_reward(physics) * move_reward
+
+
+class Jump(base.Task):
+  """A quadruped task solved by jumping to a designated height."""
+
+  def __init__(self, desired_height, random=None):
+    """Initializes an instance of `Jump`.
+
+    Args:
+      desired_height: A float. If this value is zero, reward is given simply
+        for standing upright. Otherwise this specifies the vertical height
+        at which the altitude-dependent reward component is maximized.
+      random: Optional, either a `numpy.random.RandomState` instance, an
+        integer seed for creating a new `RandomState`, or None to select a seed
+        automatically (default).
+    """
+    self._desired_height = desired_height
+    self.highest = .5
+    self.lowest = .5
+    super().__init__(random=random)
+
+  def initialize_episode(self, physics):
+    """Sets the state of the environment at the start of each episode.
+
+    Args:
+      physics: An instance of `Physics`.
+
+    """
+    # Initial configuration.
+    orientation = self.random.randn(4)
+    orientation /= np.linalg.norm(orientation)
+    _find_non_contacting_height(physics, orientation)
+    super().initialize_episode(physics)
+
+  def get_observation(self, physics):
+    """Returns an observation to the agent."""
+    return _common_observations(physics)
+
+  def get_reward(self, physics):
+    """Returns a reward to the agent."""
+
+    # Jump reward term.
+    # import pdb; pdb.set_trace()
+    temp_highest = max(self.highest, physics.torso_height()[-1])
+    temp_lowest = min(self.lowest, physics.torso_height()[-1])
+    if temp_highest > self.highest:
+      self.highest = temp_highest
+    if temp_lowest < self.lowest:
+      self.lowest = temp_lowest
+
+    self.highest -= .0005
+    self.lowest += .0005
+    reward = self.highest - self.lowest
+    # print(f"physics.torso_height(): {physics.torso_height()}")
+
+    # if self.random.rand() < 0.001:
+    #   print(f"highest: {self.highest}, lowest: {self.lowest}, reward: {self.highest - self.lowest}")
+    #   print(f"reward: {_upright_reward(physics) * (self.highest - self.lowest)}")
+    #   print(f"_upright_reward(physics): {_upright_reward(physics)}")
+
+
+    # print(f"highest_height: {self.highest_height}")
+    # import pdb; pdb.set_trace()
+    # jump_reward = rewards.tolerance(
+    #     physics.torso_height()[-1],
+    #     bounds=(self._desired_height, float('inf')),
+    #     margin=self._desired_height,
+    #     value_at_margin=0.1,
+    #     sigmoid='gaussian')
+    # print(f"jump_reward: {jump_reward}")
+    # print("\n")
+    return _upright_reward(physics) * reward
+
+
+class Climb(base.Task):
+  """A quadruped task solved by escaping a bowl-shaped terrain."""
+
+  def pyramid(self, n):
+    r = np.arange(n)
+    d = np.minimum(r, r[::-1])
+    return np.minimum.outer(d, d)
+
+  def initialize_episode(self, physics):
+    """Sets the state of the environment at the start of each episode.
+
+    Args:
+      physics: An instance of `Physics`.
+
+    """
+    # Get heightfield resolution, assert that it is square.
+    res = physics.model.hfield_nrow[_HEIGHTFIELD_ID]
+    assert res == physics.model.hfield_ncol[_HEIGHTFIELD_ID]
+    start_idx = physics.model.hfield_adr[_HEIGHTFIELD_ID]
+    scale_factor = 4
+    pyramid = self.pyramid(res)
+    bias = pyramid.max() - 5
+    terrain = np.round(scale_factor * (bias - pyramid).clip(min=0) / pyramid.max(), 1)
+    # import pdb; pdb.set_trace()
+    physics.model.hfield_data[start_idx:start_idx+res**2] = terrain.ravel()
+    super().initialize_episode(physics)
+
+    # If we have a rendering context, we need to re-upload the modified
+    # heightfield data.
+    if physics.contexts:
+      with physics.contexts.gl.make_current() as ctx:
+        ctx.call(mjlib.mjr_uploadHField,
+                 physics.model.ptr,
+                 physics.contexts.mujoco.ptr,
+                 _HEIGHTFIELD_ID)
+
+    # Initial configuration.
+    orientation = self.random.randn(4)
+    orientation /= np.linalg.norm(orientation)
+    _find_non_contacting_height(physics, orientation)
+
+  def get_observation(self, physics):
+    """Returns an observation to the agent."""
+    obs = _common_observations(physics)
+    obs['origin'] = physics.origin()
+    obs['rangefinder'] = physics.rangefinder()
+    return obs
+
+  def get_reward(self, physics):
+    """Returns a reward to the agent."""
+
+    # Escape reward term.
+    terrain_size = physics.model.hfield_size[_HEIGHTFIELD_ID, 0]
+    escape_reward = rewards.tolerance(
+        physics.origin_distance(),
+        bounds=(terrain_size, float('inf')),
+        margin=terrain_size,
+        value_at_margin=0,
+        sigmoid='linear')
+
+    return _upright_reward(physics, deviation_angle=20) * escape_reward
+
+
+class Hurdles(base.Task):
+  """A quadruped task solved by hurdling."""
+
+  def make_hurdles(self, res, scale_factor=.2):
+    hurdles_terrain = np.ones((res, res))
+
+    for i in range(res, 1, -1):
+      #     print(f"i: {i}")
+      if i % 10 == 0 or i % 11 == 0:
+        hurdles_terrain[res - i: i, res - i:i] = 1
+      else:
+        hurdles_terrain[res - i: i, res - i:i] = 0
+    hurdles_terrain = hurdles_terrain * scale_factor
+    return hurdles_terrain
+
+  def initialize_episode(self, physics):
+    """Sets the state of the environment at the start of each episode.
+
+    Args:
+      physics: An instance of `Physics`.
+
+    """
+    # Get heightfield resolution, assert that it is square.
+    res = physics.model.hfield_nrow[_HEIGHTFIELD_ID]
+    assert res == physics.model.hfield_ncol[_HEIGHTFIELD_ID]
+    start_idx = physics.model.hfield_adr[_HEIGHTFIELD_ID]
+    hurdles_terrain = self.make_hurdles(res)
+    physics.model.hfield_data[start_idx:start_idx+res**2] = hurdles_terrain.ravel()
+    super().initialize_episode(physics)
+
+    # If we have a rendering context, we need to re-upload the modified
+    # heightfield data.
+    if physics.contexts:
+      with physics.contexts.gl.make_current() as ctx:
+        ctx.call(mjlib.mjr_uploadHField,
+                 physics.model.ptr,
+                 physics.contexts.mujoco.ptr,
+                 _HEIGHTFIELD_ID)
+
+    # Initial configuration.
+    orientation = self.random.randn(4)
+    orientation /= np.linalg.norm(orientation)
+    _find_non_contacting_height(physics, orientation)
+
+  def get_observation(self, physics):
+    """Returns an observation to the agent."""
+    obs = _common_observations(physics)
+    obs['origin'] = physics.origin()
+    obs['rangefinder'] = physics.rangefinder()
+    return obs
+
+  def get_reward(self, physics):
+    """Returns a reward to the agent."""
+
+    # Escape reward term.
+    terrain_size = physics.model.hfield_size[_HEIGHTFIELD_ID, 0]
+    escape_reward = rewards.tolerance(
+        physics.origin_distance(),
+        bounds=(terrain_size, float('inf')),
+        margin=terrain_size,
+        value_at_margin=0,
+        sigmoid='linear')
+
+    return _upright_reward(physics, deviation_angle=20) * escape_reward
 
 
 class Escape(base.Task):

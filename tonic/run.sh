@@ -1,0 +1,5 @@
+ python3 -m tonic.train     --header "import tonic.torch"     --agent "tonic.torch.agents.PPO(replay=tonic.replays.Segment(size=10, batch_size=2000, batch_iterations=10))"     --environment "tonic.environments.ControlSuite('quadruped-walk')"     --trainer "tonic.Trainer(epoch_steps=100, steps=50000, save_steps=5000)"     --parallel 10     --sequential 100     --name "PPO-quadruped-walk"     --seed 1
+
+python3 -m tonic.train     --header "import tonic.torch"     --agent "tonic.torch.agents.PPO(replay=tonic.replays.Segment(size=10, batch_size=2000, batch_iterations=10))"     --environment "tonic.environments.ControlSuite('quadruped-jump')"     --trainer "tonic.Trainer(epoch_steps=100, steps=50000, save_steps=5000)"     --parallel 10     --sequential 100     --name "PPO-quadruped-jump"     --seed 2
+#python3 -m tonic.play --path humanoid_CMU-run/PPO-torch-demo-humanoid_CMU-run/1 --save-name humanoid_CMU.mp4 &
+python3 -m tonic.play --path quadruped-jump/PPO-quadruped-jump/1
