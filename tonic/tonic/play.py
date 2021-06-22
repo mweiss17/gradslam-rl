@@ -83,6 +83,7 @@ def play_control_suite(agent, environment, save_name=""):
             ob, rew, term, _ = self.environment.step(actions)
             self.obs.append(self.unwrapped.render(width=self.width, height=self.height))
             # self.obs.append(ob)
+            print(rew)
             self.score += rew
             self.length += 1
             timeout = self.length == self.environment.max_episode_steps
@@ -115,12 +116,16 @@ def play_control_suite(agent, environment, save_name=""):
 
     # Launch the viewer with the wrapped environment and policy.
     viewer.launch(environment, policy)
+
     if save_name:
         environment.obs = np.array(environment.obs)
         print(environment.obs.shape)
         frames, height, width, colors = environment.obs.shape
         print(environment.obs.shape)
-        video = cv2.VideoWriter(save_name, cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (width, height))
+        # import pdb;
+        # pdb.set_trace()
+
+        video = cv2.VideoWriter(save_name, cv2.VideoWriter_fourcc('F','M','P','4'), 30.0, (width, height))
         for i in range(frames):
             RGB_img = cv2.cvtColor(environment.obs[i,:,:,:], cv2.COLOR_BGR2RGB)
 
@@ -132,7 +137,6 @@ def play(path, checkpoint, seed, save_name=""):
     '''Reloads an agent and an environment from a previous experiment.'''
 
     tonic.logger.log(f'Loading experiment from {path}')
-
     # Use no checkpoint, the agent is freshly created.
     if checkpoint == 'none':
         checkpoint_path = None

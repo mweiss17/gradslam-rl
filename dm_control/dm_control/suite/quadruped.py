@@ -530,16 +530,17 @@ class Climb(base.Task):
 class Hurdles(base.Task):
   """A quadruped task solved by hurdling."""
 
-  def make_hurdles(self, res, scale_factor=.2):
+  def make_hurdles(self, res):
     hurdles_terrain = np.ones((res, res))
-
-    for i in range(res, 1, -1):
+    scale_factor = 1
+    for i in range(res, 2, -1):
       #     print(f"i: {i}")
-      if i % 10 == 0 or i % 11 == 0:
-        hurdles_terrain[res - i: i, res - i:i] = 1
+      if i % 10 == 0:
+        hurdles_terrain[res - i: i, res - i:i] = np.clip(.2 * scale_factor, a_min=0, a_max=1)
+        scale_factor = scale_factor - 0.1
       else:
         hurdles_terrain[res - i: i, res - i:i] = 0
-    hurdles_terrain = hurdles_terrain * scale_factor
+    hurdles_terrain = hurdles_terrain
     return hurdles_terrain
 
   def initialize_episode(self, physics):
@@ -549,6 +550,9 @@ class Hurdles(base.Task):
       physics: An instance of `Physics`.
 
     """
+    self.lowest = 0.5
+    self.highest = 0.5
+
     # Get heightfield resolution, assert that it is square.
     res = physics.model.hfield_nrow[_HEIGHTFIELD_ID]
     assert res == physics.model.hfield_ncol[_HEIGHTFIELD_ID]
@@ -559,12 +563,12 @@ class Hurdles(base.Task):
 
     # If we have a rendering context, we need to re-upload the modified
     # heightfield data.
-    if physics.contexts:
-      with physics.contexts.gl.make_current() as ctx:
-        ctx.call(mjlib.mjr_uploadHField,
-                 physics.model.ptr,
-                 physics.contexts.mujoco.ptr,
-                 _HEIGHTFIELD_ID)
+    # if physics.contexts:
+    #   with physics.contexts.gl.make_current() as ctx:
+    #     ctx.call(mjlib.mjr_uploadHField,
+    #              physics.model.ptr,
+    #              physics.contexts.mujoco.ptr,
+    #              _HEIGHTFIELD_ID)
 
     # Initial configuration.
     orientation = self.random.randn(4)
@@ -574,8 +578,8 @@ class Hurdles(base.Task):
   def get_observation(self, physics):
     """Returns an observation to the agent."""
     obs = _common_observations(physics)
-    obs['origin'] = physics.origin()
-    obs['rangefinder'] = physics.rangefinder()
+    # obs['origin'] = physics.origin()
+    # obs['rangefinder'] = physics.rangefinder()
     return obs
 
   def get_reward(self, physics):
@@ -590,7 +594,20 @@ class Hurdles(base.Task):
         value_at_margin=0,
         sigmoid='linear')
 
-    return _upright_reward(physics, deviation_angle=20) * escape_reward
+    # jump reward
+    temp_highest = max(self.highest, physics.torso_height()[-1])
+    temp_lowest = min(self.lowest, physics.torso_height()[-1])
+    if temp_highest > self.highest:
+      self.highest = temp_highest
+    if temp_lowest < self.lowest:
+      self.lowest = temp_lowest
+
+    self.highest -= .0005
+    self.lowest += .0005
+    jump_reward = self.highest - self.lowest
+
+    reward = (jump_reward + escape_reward) * _upright_reward(physics, deviation_angle=20)
+    return reward
 
 
 class Escape(base.Task):
